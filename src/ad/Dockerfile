@@ -4,7 +4,7 @@ WORKDIR /usr/src/app/
 
 COPY gradlew* settings.gradle* build.gradle .
 COPY ./gradle ./gradle
-
+ 
 RUN chmod +x ./gradlew
 RUN ./gradlew
 RUN ./gradlew downloadRepos
