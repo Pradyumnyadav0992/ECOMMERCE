@@ -1,0 +1,53 @@
+pipeline{
+    agent any
+    environment {
+        VERSION = ''
+        DOCKER_USENAME = credentials('DOCKER_CREDENTIALS')
+    }
+
+    parameters {
+        choice(name: "Version" , choices: ["A","B"], description: "Anything" )
+        booleanParam(name: 'executeTest', defaultValue: true, description: "hi")
+    }
+
+    stages{
+
+        stage("PULL"){
+                git branch 'main' , url: 'https://github.com/Pradyumnyadav0992/ECOMMERCE.git'
+        }
+
+        stage("File change List"){
+
+            when {
+                expression { 
+                    params.executeTest == true
+                }
+            }
+
+        }
+
+        stage("JTest"){
+
+        }
+
+        stage("Build"){
+
+        }
+
+        stage("Image Scan"){
+
+        }
+
+        stage("Push"){
+
+            withCredentials([ usernamePassword(credentials: 'DOCKER_CREDENTIALS' , usernamePassword: USER , usernamePassword: PassWD)])
+            {
+
+            }
+        }
+
+        stage("Update Manifest"){
+
+        }
+    }
+}
