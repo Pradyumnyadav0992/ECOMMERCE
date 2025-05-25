@@ -24,7 +24,71 @@ pipeline{
                 }
             }
 
+        }pipeline{
+    agent any
+    environment {
+        VERSION = ''
+        DOCKER_USENAME = credentials('DOCKER_CREDENTIALS')
+    }
+
+    parameters {
+        choice(name: "Version" , choices: ["A","B"], description: "Anything" )
+        booleanParam(name: 'executeTest', defaultValue: true, description: "hi")
+    }
+
+    stages{
+
+        stage("PULL"){
+                git branch 'main' , url: 'https://github.com/Pradyumnyadav0992/ECOMMERCE.git'
+                script {
+                    def version = sh(script: "git describe --tags --abbrev=0" , returnStdout: true).trim()
+                    env.VERSION=version
+                    echo "Using version: ${env.VERSION}"
+                }
         }
+
+
+
+        stage("File change List"){
+
+            script {
+                def changedFiles = sh(script: "git diff --name-only HEAD~1 HEAD", returnStdout: true).trim()
+                echo "Changed files:\n${changedFiles}"
+            }
+
+            when {
+                expression { 
+                    params.executeTest == true
+                }
+            }
+
+        }
+
+        stage("JTest"){
+
+        }
+
+        stage("Build"){
+
+        }
+
+        stage("Image Scan"){
+
+        }
+
+        stage("Push"){
+
+            withCredentials([ usernamePassword(credentials: 'DOCKER_CREDENTIALS' , usernamePassword: USER , usernamePassword: PassWD)])
+            {
+
+            }
+        }
+
+        stage("Update Manifest"){
+
+        }
+    }
+}
 
         stage("JTest"){
 
