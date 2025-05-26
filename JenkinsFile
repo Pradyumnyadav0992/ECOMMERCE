@@ -1,4 +1,9 @@
+ def services =[ 'accounting', 'cart', 'ad', 'checkout', 'currency', 'email', 'frontend-proxy', 'fraud-detection', 
+                                    'flagd-ui','frontend', 'image-provider','load-generator', 'kafka', 'payment', 'product-catalog', 'quote', 'recommendation', 'shipping']
+                 
 def changedFiles = []
+def envList  = []
+def envMap = [:]
 pipeline{
 
     agent {
@@ -8,41 +13,104 @@ pipeline{
         }
     }
     environment {
-        // VERSION = ''
-        DOCKER_USENAME = credentials('DOCKER_CREDENTIALS')
-    }
+                  AWS_REGION = 'us-west-2'
 
-    // parameters {
-    //     choice(name: "Version" , choices: ["A","B"], description: "Anything" )
-    //     booleanParam(name: 'executeTest', defaultValue: true, description: "hi")
-    // }
+    }
 
     stages{
 
-        stage("Checkout") {
+        stage("Checkout and Version Update") {
             steps {
                 git branch: 'main', url: 'https://github.com/Pradyumnyadav0992/ECOMMERCE.git'
                 script {
-                    def version = sh(script: 'git describe --tags --abbrev=0', returnStdout: true).trim()
-                    env.VERSION = version
-                    echo "Using version: ${env.VERSION}"
+
+                    // Get the latest tag 
+                    def latestTag = sh(script: "git describe --tags --abbrev=0", returnStdout: true).trim()
+                    echo "Latest tag: ${latestTag}"
+
+                    // Remove 'v' and split version
+                    def version = latestTag.replace("v", "").split("\\.")
+                    def major = version[0].toInteger()
+                    def minor = version[1].toInteger()
+                    def patch = version[2].toInteger()
+
+                    // Get latest commit message
+                    def commitMsgRaw = sh(script: "git log -1 --pretty=%B", returnStdout: true).trim()
+                    def commitMsg = commitMsgRaw.toLowerCase()
+                    echo "Latest commit message: ${commitMsgRaw}"
+
+                    // Decide which version part to bump  
+                    if (commitMsg.contains("breaking:")) {
+                        major += 1
+                        minor = 0
+                        patch = 0
+                    } else if (commitMsg.startsWith("feat:")) {
+                        minor += 1
+                        patch = 0
+                    } else if (commitMsg.startsWith("fix:")) {
+                        patch += 1
+                    } else {
+                        echo "No version bump keywords found. Keeping existing version."
+                        return
+                    }
+
+                    // Build new tag
+                    def newVersion = "v${major}.${minor}.${patch}"
+                    echo "New version tag: ${newVersion}"
+
+                    // Set environment variable for later steps
+                    env.VERSION = newVersion
+                    
+
                 }
             }
         }
-
-
+ 
 
         stage("File change List"){
         steps {
             script {
                 changedFiles = sh(script: 'git diff --name-only $(git describe --tags --abbrev=0)..HEAD', returnStdout: true).trim().split("\n")
                 env.FILECHANGELIST = changedFiles
-                echo "Changed files:\n${changedFiles}"
+                echo "Changed files:\n" + changedFiles.collect { "  - ${it}" }.join("\n")
+                // Exit if non relevent files is committed 
+                if (!changedFiles.any { it.contains("src/") }) {  
+                     error("No changes detected in 'src'. Failing the build.")
+                }
+
 
             }
         }
 
         }
+
+
+            stage('Load .env ') {
+            steps {
+                script {
+                            envMap = [:]    // Map to store key-value pairs
+                            envList = []    // List of "KEY=VALUE" strings for withEnv()
+
+                            def envFile = readFile('.env').split("\n")
+
+                            envFile.each { line ->
+                                line = line.trim()
+                                if (line && !line.startsWith("#")) {
+                                    def matcher = line =~ /([^=]+)=(.*)/
+                                    if (matcher.matches()) {
+                                        def key = matcher[0][1].trim()
+                                        def value = matcher[0][2].trim().replaceAll(/^"|"$/, '')  // Remove quotes if any
+                                        envMap[key] = value
+                                        envList << "${key}=${value}"
+                                    }
+                                }
+                            }
+
+                }
+            }
+        }
+
+
 
         stage("JTest"){
             steps {
@@ -54,62 +122,126 @@ pipeline{
         stage("Build"){
                     steps {
                         script{
-                            def services =[ 'accounting', 'cart', 'ad', 'checkout', 'currency', 'email', 'frontend-proxy', 'fraud-detection', 
-                                    'flagd-ui','frontend', 'image-provider','load-generator', 'kafka', 'payment', 'product-catalog', 'quote', 'recommendation', 'shipping']
-                                    
+                            def key 
+                            def fileExists
                             for (svc in services) {
-                                 
-                                def matched = changedFiles.any { it.contains("src/"+svc) }
-                                if (matched) {
-                                        env.matchedvalue=svc
-                                        
-                                        sh '''
-                                         #!/bin/bash
-                                        set -a
-                                        pwd
-                                        ls -lta
-                                        . $(pwd)/.env
-                                        set +a
-                                        SVC=\${matchedvalue}
-                                        IMAGE_VERSION=\${VERSION}
-                                        echo \"Image: \$IMAGE_NAME\"
-                                        echo \"Version: \$IMAGE_VERSION\"
-                                        echo \"Demo Version: \$DEMO_VERSION\"
+                                  if ( changedFiles.any { it.contains("src/"+svc) } ) {
+                                        env.MATCHED_SVC=svc
 
-                                                                         
-                                      
-                                        #docker build -t $IMAGE_NAME:$IMAGE_VERSION-src-$SVC -f  \${dockerfiles[\$svc]} .
-                                        '''
+                                    key = svc.replaceAll('-', '_').toUpperCase() + "_DOCKERFILE"
+                                    if (envMap.containsKey(key)) {
+                                        env.dockerfilePath = envMap[key]
+                                        echo "Building Docker image for service: ${svc}"
+                                        echo "Using Dockerfile path: ${dockerfilePath}"
+
+
+                                        // Check if the Docker file exist
+                                        fileExists = sh(script: "[ -f ${dockerfilePath} ] && echo 'true' || echo 'false'", returnStdout: true).trim()
+                                        if (fileExists == 'true') {
+                                            echo "File exists: ${dockerfilePath}"
+                                        } else {
+                                            error "File does NOT exist: ${dockerfilePath}. Failing the build."
+                                        }
+                                        
+
+
+                                        sh """
+                                            #!/bin/bash
+                                        
+                                            set -a
+                                            . \$(pwd)/.env
+                                            set +a
+                                            
+                                            IMAGE_VERSION=${VERSION}
+
+                                            echo "Build the Docker image with Version : \$IMAGE_VERSION"
+
+                                            # Build the Docker image
+                                            # docker build -t \$IMAGE_NAME:\$IMAGE_VERSION-${MATCHED_SVC} -f ${dockerfilePath} .
+                                             docker build -t \$IMAGE_NAME/${MATCHED_SVC}:\$IMAGE_VERSION -f ${dockerfilePath} .
+                                        
+
+
+                                        """
                                          
-                                 }
+                                 
+                                }
                              }
                             }
+                        
 
 
 
             }
         }
+        }
 
         stage("Image Scan"){
-                        steps {
-                echo "Changed files:"
+                steps {
+                    script{
+                            
+                           for (svc in services) {
+                                  if ( changedFiles.any { it.contains("src/"+svc) } ) {
+                                    sh """
+                                        #trivy image --format json -o "trivy-report-${svc}.json" "${envMap["IMAGE_NAME"]}":"${env.VERSION}"-${svc} 
+                                        trivy image --format json -o "trivy-report-${svc}.json" "${envMap["IMAGE_NAME"]}"/"${svc}":"${env.VERSION}"
+                                    """
+                                    // Archive the report file as a build artifact
+                                    archiveArtifacts artifacts: "trivy-report-${svc}.json", fingerprint: true
+
+                                  }
+                           }
+                           
+                        }
+
             }
         }
 
         stage("Push"){
 
              steps {
-                withCredentials([usernamePassword(credentialsId: 'DOCKER_CREDENTIALS', usernameVariable: 'USER', passwordVariable: 'PASSWD')]) {
-                    echo "Pushing Docker image with user $USER"
-                    // Example: sh "docker login -u $USER -p $PASSWD"
-                }
-            }
+                      script{
+                            
+                        for (svc in services) {
+                            if ( changedFiles.any { it.contains("src/"+svc) } ) {
+
+
+                        withCredentials([usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                            sh '''
+                                export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+                                export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                                aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+                            '''
+                        }
+                            }
+                        }
         }
+     
+     }
+    }
 
         stage("Update Manifest"){
              steps {
                 echo "Changed files:"
             }
         }
+
+         stage('Tag and Push') {
+            when {
+                expression { return env.VERSION != null }
+            }
+            steps {
+                script {
+                    // Configure Git and push the new tag
+                    sh """
+                        git tag ${env.VERSION}
+                        git push origin ${env.VERSION}
+                    """
+                }
+            }
+        }
+
+
+
     }
 }
