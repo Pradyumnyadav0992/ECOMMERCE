@@ -31,7 +31,7 @@ spec:
       serviceAccountName: opentelemetry-demo
       containers:
         - name: quoteservice
-          image: 'ghcr.io/open-telemetry/demo:1.12.0-quoteservice'
+          image: 'ghcr.io/open-telemetry/demo:1.12.0-quote'
           imagePullPolicy: IfNotPresent
           ports:
             

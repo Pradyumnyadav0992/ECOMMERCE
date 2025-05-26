@@ -1,18 +1,23 @@
 pipeline{
-    agent any
+    agent {
+        node {
+        label 'Slave_bastion'
+        customWorkspace '/home/ubuntu/jenkins_workspace/' 
+        }
+    }
     environment {
-        VERSION = ''
+        // VERSION = ''
         DOCKER_USENAME = credentials('DOCKER_CREDENTIALS')
     }
 
-    parameters {
-        choice(name: "Version" , choices: ["A","B"], description: "Anything" )
-        booleanParam(name: 'executeTest', defaultValue: true, description: "hi")
-    }
+    // parameters {
+    //     choice(name: "Version" , choices: ["A","B"], description: "Anything" )
+    //     booleanParam(name: 'executeTest', defaultValue: true, description: "hi")
+    // }
 
     stages{
 
-        stage("PULL") {
+        stage("Checkout") {
             steps {
                 git branch: 'main', url: 'https://github.com/Pradyumnyadav0992/ECOMMERCE.git'
                 script {
@@ -28,8 +33,9 @@ pipeline{
         stage("File change List"){
         steps {
             script {
-                def changedFiles = sh(script: "git diff --name-only HEAD~1 HEAD", returnStdout: true).trim()
-                echo "Changed files:\n${changedFiles}"
+                def changedFiles = sh(script: "git diff --name-only HEAD~1 HEAD", returnStdout: true).trim() 
+                env.FILECHANGELIST = changedFiles
+                echo "Changed files:\n${env.FILECHANGELIST}"
             }
         }
 
@@ -44,6 +50,26 @@ pipeline{
 
         stage("Build"){
                     steps {
+                        script{
+                            def services =[ 'accounting', 'cart', 'ad', 'checkout', 'currency', 'email', 'frontend-proxy', 'fraud-detection', 'flagd-ui', 'flagd', 'grafana', 'frontend', 'image-provider', 'otel-collector', 'load-generator', 'kafka', 'payment', 'prometheus', 'product-catalog', 'quote', 'recommendation', 'react-native-app', 'shipping']
+                            for (i in services){
+                                if ( i in env.FILECHANGELIST){
+                                        sh '''
+                                        set -a
+                                        source .env
+                                        set +a
+
+                                        echo "Image: $IMAGE_NAME"
+                                        echo "Version: $IMAGE_VERSION"
+                                        echo "Demo Version: $DEMO_VERSION"
+
+                                        docker build -t ${IMAGE_NAME}:${DEMO_VERSION}-${i} .
+                                        '''
+                                 }
+                             }
+                            }
+
+
                 echo "Changed files:"
             }
         }
