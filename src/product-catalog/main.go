@@ -13,7 +13,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -54,12 +53,14 @@ var (
 	initResourcesOnce sync.Once
 )
 
-const DEFAULT_RELOAD_INTERVAL = 10
-
 func init() {
 	log = logrus.New()
-
-	loadProductCatalog()
+	var err error
+	catalog, err = readProductFiles()
+	if err != nil {
+		log.Fatalf("Reading Product Files: %v", err)
+		os.Exit(1)
+	}
 }
 
 func initResource() *sdkresource.Resource {
@@ -175,43 +176,6 @@ func main() {
 
 type productCatalog struct {
 	pb.UnimplementedProductCatalogServiceServer
-}
-
-func loadProductCatalog() {
-	log.Info("Loading Product Catalog...")
-	var err error
-	catalog, err = readProductFiles()
-	if err != nil {
-		log.Fatalf("Error reading product files: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Default reload interval is 10 seconds
-	interval := DEFAULT_RELOAD_INTERVAL
-	si := os.Getenv("PRODUCT_CATALOG_RELOAD_INTERVAL")
-	if si != "" {
-		interval, _ = strconv.Atoi(si)
-		if interval <= 0 {
-			interval = DEFAULT_RELOAD_INTERVAL
-		}
-	}
-	log.Infof("Product Catalog reload interval: %d", interval)
-
-	ticker := time.NewTicker(time.Duration(interval) * time.Second)
-
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				log.Info("Reloading Product Catalog...")
-				catalog, err = readProductFiles()
-				if err != nil {
-					log.Errorf("Error reading product files: %v", err)
-					continue
-				}
-			}
-		}
-	}()
 }
 
 func readProductFiles() ([]*pb.Product, error) {
@@ -351,3 +315,8 @@ func createClient(ctx context.Context, svcAddr string) (*grpc.ClientConn, error)
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	)
 }
+
+
+
+
+
