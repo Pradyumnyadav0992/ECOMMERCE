@@ -32,7 +32,7 @@ spec:
       serviceAccountName: opentelemetry-demo
       containers:
         - name: cartservice
-          image: '366505777092.dkr.ecr.us-west-2.amazonaws.com/cart:"v1.0.4"'
+          image: '366505777092.dkr.ecr.us-west-2.amazonaws.com/cart:[CURRENT_VERSION]'
           imagePullPolicy: IfNotPresent
           ports:
             
