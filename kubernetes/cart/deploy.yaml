@@ -22,6 +22,7 @@ spec:
   template:
     metadata:
       labels:
+
         
         opentelemetry.io/name: opentelemetry-demo-cartservice
         app.kubernetes.io/instance: opentelemetry-demo
