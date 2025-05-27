@@ -5,6 +5,7 @@ kind: Deployment
 metadata:
   name: opentelemetry-demo-cartservice
   labels:
+
     
     opentelemetry.io/name: opentelemetry-demo-cartservice
     app.kubernetes.io/instance: opentelemetry-demo
@@ -22,7 +23,7 @@ spec:
   template:
     metadata:
       labels:
-        
+
         opentelemetry.io/name: opentelemetry-demo-cartservice
         app.kubernetes.io/instance: opentelemetry-demo
         app.kubernetes.io/component: cartservice
@@ -31,7 +32,7 @@ spec:
       serviceAccountName: opentelemetry-demo
       containers:
         - name: cartservice
-          image: '366505777092.dkr.ecr.us-west-2.amazonaws.com/cart:${VERSION}'
+          image: '366505777092.dkr.ecr.us-west-2.amazonaws.com/cart:v1.0.5'
           imagePullPolicy: IfNotPresent
           ports:
             
