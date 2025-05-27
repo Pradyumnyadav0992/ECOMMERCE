@@ -4,6 +4,12 @@
 def changedFiles = []
 def envList  = []
 def envMap = [:]
+
+
+// 1.Provide some common for svc
+// 2. Docker file should be done at the time of .env load
+// 3. 
+
 pipeline{
 
     agent {
@@ -14,6 +20,7 @@ pipeline{
     }
     environment {
                   AWS_REGION = 'us-west-2'
+                  ECR_REGISTRY='366505777092.dkr.ecr.us-west-2.amazonaws.com'
 
     }
 
@@ -50,8 +57,9 @@ pipeline{
                     } else if (commitMsg.startsWith("fix:")) {
                         patch += 1
                     } else {
-                        echo "No version bump keywords found. Keeping existing version."
-                        return
+                        error("No version bump keywords found. Keeping existing version.")
+                       
+                       
                     }
 
                     // Build new tag
@@ -65,6 +73,7 @@ pipeline{
                 }
             }
         }
+    
  
 
         stage("File change List"){
@@ -88,9 +97,6 @@ pipeline{
             stage('Load .env ') {
             steps {
                 script {
-                            envMap = [:]    // Map to store key-value pairs
-                            envList = []    // List of "KEY=VALUE" strings for withEnv()
-
                             def envFile = readFile('.env').split("\n")
 
                             envFile.each { line ->
@@ -110,14 +116,6 @@ pipeline{
             }
         }
 
-
-
-        stage("JTest"){
-            steps {
-                echo "Changed files:"
-            }
-        
-        }
 
         stage("Build"){
                     steps {
@@ -152,16 +150,13 @@ pipeline{
                                             . \$(pwd)/.env
                                             set +a
                                             
-                                            IMAGE_VERSION=${VERSION}
+                                            IMAGE_VERSION="${env.VERSION}"
 
                                             echo "Build the Docker image with Version : \$IMAGE_VERSION"
 
                                             # Build the Docker image
-                                            # docker build -t \$IMAGE_NAME:\$IMAGE_VERSION-${MATCHED_SVC} -f ${dockerfilePath} .
-                                             docker build -t \$IMAGE_NAME/${MATCHED_SVC}:\$IMAGE_VERSION -f ${dockerfilePath} .
+                                            docker build -t \$IMAGE_NAME/${MATCHED_SVC}:\$IMAGE_VERSION -f ${dockerfilePath} .
                                         
-
-
                                         """
                                          
                                  
@@ -183,9 +178,8 @@ pipeline{
                            for (svc in services) {
                                   if ( changedFiles.any { it.contains("src/"+svc) } ) {
                                     sh """
-                                        #trivy image --format json -o "trivy-report-${svc}.json" "${envMap["IMAGE_NAME"]}":"${env.VERSION}"-${svc} 
-                                        trivy image --format json -o "trivy-report-${svc}.json" "${envMap["IMAGE_NAME"]}"/"${svc}":"${env.VERSION}"
-                                    """
+                                        trivy image  --exit-code 0 --severity HIGH,CRITICAL --format json -o "trivy-report-${svc}.json" "${envMap["IMAGE_NAME"]}"/"${svc}":"${env.VERSION}"
+                                       """
                                     // Archive the report file as a build artifact
                                     archiveArtifacts artifacts: "trivy-report-${svc}.json", fingerprint: true
 
@@ -199,31 +193,73 @@ pipeline{
 
         stage("Push"){
 
+                    environment {
+                                
+                                IMAGE_NAME ="${envMap['IMAGE_NAME']}"
+                                }
+
              steps {
                       script{
                             
                         for (svc in services) {
                             if ( changedFiles.any { it.contains("src/"+svc) } ) {
+                                env.MATCHED_SVC=svc
+                                        sh  '''
+                                            docker push \$IMAGE_NAME"/"\$MATCHED_SVC":"\$VERSION
+                                        '''
 
 
-                        withCredentials([usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                            sh '''
-                                export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-                                export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
-                                aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
-                            '''
+                            //     sh  '''
+                            //     #aws configure set aws_access_key_id \$AWS_ACCESS_KEY_ID
+                            //     #aws configure set aws_secret_access_key \$AWS_SECRET_ACCESS_KEY
+                            //     #export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+                            //     #export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                            //     #aws ecr get-login-password --region \$AWS_REGION | docker login --username AWS --password-stdin \${ECR_REGISTRY}/\${MATCHED_SVC}
+                            
+                            //     docker push \$IMAGE_NAME"/"\$MATCHED_SVC":"\$VERSION
+                            
+                            // '''
+
+                            // sh 'AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY aws ecr get-login-password --region \$AWS_REGION | docker login --username AWS --password-stdin \$ECR_REGISTRY/\$MATCHED_SVC'
+                             //sh "docker push "${envMap["IMAGE_NAME"]}"/"${svc}":"${env.VERSION}""
+
                         }
                             }
                         }
         }
      
      }
-    }
+    
 
         stage("Update Manifest"){
              steps {
-                echo "Changed files:"
-            }
+
+                      script{
+                            
+                        for (svc in services) {
+                            env.MATCHED_SVC=svc
+                            if ( changedFiles.any { it.contains("src/"+svc) } ) {
+                                
+                                echo "Manifested files Updated for :${svc}"
+
+
+                                withCredentials([usernamePassword(credentialsId: 'your-github-creds-id', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_TOKEN')]) {
+                                    sh """
+                                        sed -i 's|\\[CURRENT_VERSION\\]|${env.VERSION}|g' ./kubernetes/${MATCHED_SVC}/deploy.yaml
+                                        git add ./kubernetes/${MATCHED_SVC}/deploy.yaml
+                                        git commit -m "Manifest file updated for ./kubernetes/${MATCHED_SVC}/deploy.yaml"
+
+                                        """
+                                      sh  'git remote set-url origin https://\$GIT_USERNAME:\$GIT_TOKEN@github.com/\$GIT_USERNAME/ECOMMERCE.git'
+                                      sh  'git push --set-upstream origin main'
+                                        }
+
+                                        }
+                                }
+
+                                echo "Manifested files Updated Succeessfully"
+                      }
+             }
         }
 
          stage('Tag and Push') {
@@ -235,7 +271,7 @@ pipeline{
                     // Configure Git and push the new tag
                     sh """
                         git tag ${env.VERSION}
-                        git push origin ${env.VERSION}
+                        git push --tags
                     """
                 }
             }
